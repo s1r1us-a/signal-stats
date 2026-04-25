@@ -2742,9 +2742,12 @@ function renderPerPerson(s, chat) {
   const pp = s.perPerson;
   if (!pp || pp.size < 2) return '';
 
-  // Sort participants by sent count
+  // Sort participants by sent count.
+  // Filter out "phantom" entries that exist only because someone was mentioned/quoted/reacted-to
+  // but never actually wrote anything in this chat (e.g. ex-members whose ACI we can't resolve).
+  // The schreibstil comparison only makes sense for people who actually wrote messages.
   const people = [...pp.entries()]
-    .filter(([id]) => id != null)
+    .filter(([id, p]) => id != null && p.sent > 0)
     .sort((a, b) => b[1].sent - a[1].sent);
 
   if (people.length < 2) return '';
@@ -3469,8 +3472,7 @@ function renderLanguageSection(s) {
 
   // Who gets mentioned
   const topMentions = [...s.mentionCounts.entries()].sort((a,b) => b[1]-a[1]).slice(0, 8).map(([id, c]) => {
-    const r = STATE.recipients.get(id);
-    return { label: r ? r.name : `#${id}`, value: c };
+    return { label: authorName(id, null), value: c };
   });
 
   return `
@@ -3537,12 +3539,10 @@ function renderDomainsSection(s) {
 function renderQuoteSection(s) {
   if (!s.quoteCount) return '';
   const topQuoted = [...s.quotedAuthorCounts.entries()].sort((a,b) => b[1]-a[1]).slice(0, 10).map(([id,c]) => {
-    const r = STATE.recipients.get(id);
-    return { label: r ? (id === STATE.selfId ? 'Du' : r.name) : `#${id}`, value: c };
+    return { label: authorName(id, null), value: c };
   });
   const topQuoter = [...s.quoterCounts.entries()].sort((a,b) => b[1]-a[1]).slice(0, 10).map(([id,c]) => {
-    const r = STATE.recipients.get(id);
-    return { label: r ? (id === STATE.selfId ? 'Du' : r.name) : `#${id}`, value: c };
+    return { label: authorName(id, null), value: c };
   });
   return `
     <div class="section">
@@ -3633,9 +3633,7 @@ function renderInitiationsSection(s, chat) {
   if (total < 2) return '';
 
   const items = [...s.initiationsByAuthor.entries()].sort((a,b) => b[1]-a[1]).map(([id, count]) => {
-    const r = STATE.recipients.get(id);
-    const name = id === STATE.selfId ? 'Du' : (r ? r.name : `#${id}`);
-    return { label: name, value: count };
+    return { label: authorName(id, chat), value: count };
   });
 
   return `
@@ -3927,7 +3925,11 @@ function authorName(authorId, chat) {
   if (authorId === STATE.selfId) return 'Du';
   const r = STATE.recipients.get(authorId);
   if (r) return r.name;
-  if (chat.type === 'contact') return chat.name;
+  if (chat && chat.type === 'contact') return chat.name;
+  // Unmapped ACI (e.g. ex-group-member with no contact record): show a stable, readable label
+  if (typeof authorId === 'string' && /^[A-Za-z0-9+/=]{20,}$/.test(authorId)) {
+    return `Unbekanntes Mitglied (${authorId.slice(0, 6)}…)`;
+  }
   return 'Unbekannt';
 }
 
